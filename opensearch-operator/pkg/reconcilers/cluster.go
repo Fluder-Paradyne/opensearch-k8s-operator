@@ -425,6 +425,27 @@ func (r *ClusterReconciler) maybeUpdateVolumes(existing *appsv1.StatefulSet, nod
 		return nil
 	}
 
+	// Check for storage class changes
+	existingStorageClass := existing.Spec.VolumeClaimTemplates[0].Spec.StorageClassName
+	var desiredStorageClass *string
+	if nodePool.Persistence != nil && nodePool.Persistence.PVC != nil && nodePool.Persistence.PVC.StorageClassName != "" {
+		desiredStorageClass = &nodePool.Persistence.PVC.StorageClassName
+	}
+
+	// If storage class has changed, we need to recreate the StatefulSet
+	// because Kubernetes doesn't allow changing storage class of existing PVCs
+	if (existingStorageClass == nil && desiredStorageClass != nil) ||
+		(existingStorageClass != nil && desiredStorageClass == nil) ||
+		(existingStorageClass != nil && desiredStorageClass != nil && *existingStorageClass != *desiredStorageClass) {
+		r.logger.Info("Storage class changed for nodePool %s, Current: %v, Desired: %v", nodePool.Component, existingStorageClass, desiredStorageClass)
+		annotations := map[string]string{"cluster-name": r.instance.GetName()}
+		r.recorder.AnnotatedEventf(r.instance, annotations, "Normal", "PVC", "Storage class changed for %s/%s, recreating StatefulSet", existing.Namespace, existing.Name)
+		if err := r.deleteSTSWithOrphan(existing); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	existingDisk := lo.FromPtr(existing.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests.Storage())
 	nodePoolDiskSize, err := resource.ParseQuantity(nodePool.DiskSize)
 	if err != nil {

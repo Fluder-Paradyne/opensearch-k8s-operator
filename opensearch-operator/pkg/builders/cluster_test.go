@@ -3,8 +3,9 @@ package builders
 import (
 	"context"
 	"fmt"
-	"k8s.io/utils/ptr"
 	"os"
+
+	"k8s.io/utils/ptr"
 
 	opsterv1 "github.com/Opster/opensearch-k8s-operator/opensearch-operator/api/v1"
 	"github.com/Opster/opensearch-k8s-operator/opensearch-operator/pkg/helpers"
@@ -342,6 +343,26 @@ var _ = Describe("Builders", func() {
 			var expected *string = nil
 			actual := result.Spec.VolumeClaimTemplates[0].Spec.StorageClassName
 			Expect(expected).To(Equal(actual))
+		})
+		It("should use specified storageclass when provided", func() {
+			clusterObject := ClusterDescWithVersion("2.2.1")
+			customStorageClass := "my-custom-storage-class"
+			nodePool := opsterv1.NodePool{
+				Replicas:  3,
+				Component: "masters",
+				Roles:     []string{"cluster_manager", "data"},
+				Persistence: &opsterv1.PersistenceConfig{PersistenceSource: opsterv1.PersistenceSource{
+					PVC: &opsterv1.PVCSource{
+						StorageClassName: customStorageClass,
+						AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					},
+				}},
+			}
+			clusterObject.Spec.NodePools = append(clusterObject.Spec.NodePools, nodePool)
+			result := NewSTSForNodePool("foobar", &clusterObject, nodePool, "foobar", nil, nil, nil)
+			actual := result.Spec.VolumeClaimTemplates[0].Spec.StorageClassName
+			Expect(actual).ToNot(BeNil())
+			Expect(*actual).To(Equal(customStorageClass))
 		})
 		It("should set jvm to half of memory request when memory request is set and jvm are not provided", func() {
 			clusterObject := ClusterDescWithVersion("2.2.1")
